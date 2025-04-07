@@ -48,6 +48,8 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
         }
         button:hover {
             background-color: #2980b9;
@@ -55,6 +57,11 @@
         button:disabled {
             background-color: #95a5a6;
             cursor: not-allowed;
+        }
+        .export-options {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
         }
         .status {
             margin-top: 10px;
@@ -147,8 +154,11 @@
                 </select>
             </div>
             
-            <button id="exportJsonBtn" disabled>Export as JSON</button>
-            <button id="viewPreviewBtn" disabled>View Hierarchy Preview</button>
+            <div class="export-options">
+                <button id="exportJsonBtn" disabled>Export as JSON</button>
+                <button id="exportCsvBtn" disabled>Export as CSV</button>
+                <button id="viewPreviewBtn" disabled>View Hierarchy Preview</button>
+            </div>
             <div id="exportStatus" class="status"></div>
         </div>
         
@@ -176,6 +186,7 @@
         const fetchSkillsBtn = document.getElementById('fetchSkillsBtn');
         const fetchStatus = document.getElementById('fetchStatus');
         const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const exportCsvBtn = document.getElementById('exportCsvBtn');
         const viewPreviewBtn = document.getElementById('viewPreviewBtn');
         const exportStatus = document.getElementById('exportStatus');
         const loadingSpinner = document.getElementById('loadingSpinner');
@@ -188,6 +199,7 @@
         authenticateBtn.addEventListener('click', authenticate);
         fetchSkillsBtn.addEventListener('click', fetchSkills);
         exportJsonBtn.addEventListener('click', exportSkillsJson);
+        exportCsvBtn.addEventListener('click', exportSkillsCsv);
         viewPreviewBtn.addEventListener('click', togglePreview);
         skillTypeFilter.addEventListener('change', filterHierarchy);
 
@@ -325,8 +337,9 @@
                     // Create hierarchy
                     buildHierarchy();
                     
-                    // Enable export button
+                    // Enable export buttons
                     exportJsonBtn.disabled = false;
+                    exportCsvBtn.disabled = false;
                     viewPreviewBtn.disabled = false;
                 } else {
                     updateStatus(fetchStatus, 'No skills data found.', 'error');
@@ -735,6 +748,116 @@
             } catch (error) {
                 updateStatus(exportStatus, 'Error exporting JSON: ' + error.message, 'error');
             }
+        }
+        
+        // Export skills as CSV with hierarchical structure
+        function exportSkillsCsv() {
+            try {
+                const typeFilter = skillTypeFilter.value;
+                
+                // CSV Header
+                let csvContent = "Category,Subcategory,Skill Name,Skill ID,Skill Type,Is Software,Is Language\n";
+                
+                // Process all categories
+                Object.keys(hierarchyData.categories).forEach(categoryKey => {
+                    const category = hierarchyData.categories[categoryKey];
+                    
+                    // Process direct skills in category
+                    if (category.skills && category.skills.length > 0) {
+                        category.skills.forEach(skill => {
+                            // Apply type filter if needed
+                            if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
+                                const skillType = skill.type ? skill.type.name : "Unknown";
+                                const isSoftware = skill.isSoftware ? "Yes" : "No";
+                                const isLanguage = skill.isLanguage ? "Yes" : "No";
+                                
+                                // Escape fields for CSV
+                                const escapedCategory = escapeForCsv(category.name);
+                                const escapedSkillName = escapeForCsv(skill.name);
+                                
+                                // Add row: Category, Subcategory (empty), Skill Name, Skill ID, Skill Type, Is Software, Is Language
+                                csvContent += `${escapedCategory},,${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
+                            }
+                        });
+                    }
+                    
+                    // Process skills in subcategories
+                    Object.keys(category.subcategories).forEach(subKey => {
+                        const subcategory = category.subcategories[subKey];
+                        
+                        subcategory.skills.forEach(skill => {
+                            // Apply type filter if needed
+                            if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
+                                const skillType = skill.type ? skill.type.name : "Unknown";
+                                const isSoftware = skill.isSoftware ? "Yes" : "No";
+                                const isLanguage = skill.isLanguage ? "Yes" : "No";
+                                
+                                // Escape fields for CSV
+                                const escapedCategory = escapeForCsv(category.name);
+                                const escapedSubcategory = escapeForCsv(subcategory.name);
+                                const escapedSkillName = escapeForCsv(skill.name);
+                                
+                                // Add row: Category, Subcategory, Skill Name, Skill ID, Skill Type, Is Software, Is Language
+                                csvContent += `${escapedCategory},${escapedSubcategory},${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
+                            }
+                        });
+                    });
+                });
+                
+                // Process uncategorized skills
+                if (hierarchyData.uncategorized && hierarchyData.uncategorized.length > 0) {
+                    hierarchyData.uncategorized.forEach(skill => {
+                        // Apply type filter if needed
+                        if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
+                            const skillType = skill.type ? skill.type.name : "Unknown";
+                            const isSoftware = skill.isSoftware ? "Yes" : "No";
+                            const isLanguage = skill.isLanguage ? "Yes" : "No";
+                            
+                            // Escape fields for CSV
+                            const escapedSkillName = escapeForCsv(skill.name);
+                            
+                            // Add row: Category (Uncategorized), Subcategory (empty), Skill Name, Skill ID, Skill Type, Is Software, Is Language
+                            csvContent += `Uncategorized,,${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
+                        }
+                    });
+                }
+                
+                // Create a Blob and generate download link
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                
+                // Create a temporary link and trigger download
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `lightcast-skills-hierarchy-${hierarchyData.version}-${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                
+                // Clean up
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                updateStatus(exportStatus, 'Successfully exported skills hierarchy as CSV!', 'success');
+            } catch (error) {
+                updateStatus(exportStatus, 'Error exporting CSV: ' + error.message, 'error');
+            }
+        }
+        
+        // Helper function to escape fields for CSV
+        function escapeForCsv(field) {
+            if (field === undefined || field === null) {
+                return '';
+            }
+            
+            const stringField = String(field);
+            
+            // If the field contains commas, quotes, or newlines, enclose it in quotes
+            if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
+                // Double any existing quotes
+                return '"' + stringField.replace(/"/g, '""') + '"';
+            }
+            
+            return stringField;
         }
 
         // Helper to update status messages
