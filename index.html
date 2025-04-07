@@ -372,30 +372,34 @@
                     return;
                 }
                 
+                const categoryName = skill.category;
+                
                 // Initialize category if it doesn't exist
-                if (!hierarchyData.categories[skill.category]) {
-                    hierarchyData.categories[skill.category] = {
-                        name: skill.category,
+                if (!hierarchyData.categories[categoryName]) {
+                    hierarchyData.categories[categoryName] = {
+                        name: categoryName,
                         subcategories: {}
                     };
                 }
                 
                 // If skill has a subcategory
                 if (skill.subcategory) {
-                    if (!hierarchyData.categories[skill.category].subcategories[skill.subcategory]) {
-                        hierarchyData.categories[skill.category].subcategories[skill.subcategory] = {
-                            name: skill.subcategory,
+                    const subcategoryName = skill.subcategory;
+                    
+                    if (!hierarchyData.categories[categoryName].subcategories[subcategoryName]) {
+                        hierarchyData.categories[categoryName].subcategories[subcategoryName] = {
+                            name: subcategoryName,
                             skills: []
                         };
                     }
                     
-                    hierarchyData.categories[skill.category].subcategories[skill.subcategory].skills.push(skill);
+                    hierarchyData.categories[categoryName].subcategories[subcategoryName].skills.push(skill);
                 } else {
                     // Skills with category but no subcategory
-                    if (!hierarchyData.categories[skill.category].skills) {
-                        hierarchyData.categories[skill.category].skills = [];
+                    if (!hierarchyData.categories[categoryName].skills) {
+                        hierarchyData.categories[categoryName].skills = [];
                     }
-                    hierarchyData.categories[skill.category].skills.push(skill);
+                    hierarchyData.categories[categoryName].skills.push(skill);
                 }
             });
         }
@@ -761,6 +765,7 @@
                 // Process all categories
                 Object.keys(hierarchyData.categories).forEach(categoryKey => {
                     const category = hierarchyData.categories[categoryKey];
+                    const categoryName = category.name;
                     
                     // Process direct skills in category
                     if (category.skills && category.skills.length > 0) {
@@ -772,7 +777,7 @@
                                 const isLanguage = skill.isLanguage ? "Yes" : "No";
                                 
                                 // Escape fields for CSV
-                                const escapedCategory = escapeForCsv(category.name);
+                                const escapedCategory = escapeForCsv(categoryName);
                                 const escapedSkillName = escapeForCsv(skill.name);
                                 
                                 // Add row: Category, Subcategory (empty), Skill Name, Skill ID, Skill Type, Is Software, Is Language
@@ -784,6 +789,7 @@
                     // Process skills in subcategories
                     Object.keys(category.subcategories).forEach(subKey => {
                         const subcategory = category.subcategories[subKey];
+                        const subcategoryName = subcategory.name;
                         
                         subcategory.skills.forEach(skill => {
                             // Apply type filter if needed
@@ -793,8 +799,8 @@
                                 const isLanguage = skill.isLanguage ? "Yes" : "No";
                                 
                                 // Escape fields for CSV
-                                const escapedCategory = escapeForCsv(category.name);
-                                const escapedSubcategory = escapeForCsv(subcategory.name);
+                                const escapedCategory = escapeForCsv(categoryName);
+                                const escapedSubcategory = escapeForCsv(subcategoryName);
                                 const escapedSkillName = escapeForCsv(skill.name);
                                 
                                 // Add row: Category, Subcategory, Skill Name, Skill ID, Skill Type, Is Software, Is Language
