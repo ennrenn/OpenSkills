@@ -112,6 +112,12 @@
             <label for="clientSecret">Client Secret:</label>
             <input type="password" id="clientSecret" placeholder="Enter your client_secret">
             
+            <label for="scopeSelect">API Scope:</label>
+            <select id="scopeSelect">
+                <option value="emsi_open">emsi_open</option>
+                <option value="lightcast_open_free">lightcast_open_free</option>
+            </select>
+            
             <button id="authenticateBtn">Authenticate</button>
             <div id="authStatus" class="status"></div>
         </div>
@@ -163,6 +169,7 @@
         // DOM Elements
         const clientIdInput = document.getElementById('clientId');
         const clientSecretInput = document.getElementById('clientSecret');
+        const scopeSelect = document.getElementById('scopeSelect');
         const authenticateBtn = document.getElementById('authenticateBtn');
         const authStatus = document.getElementById('authStatus');
         const versionSelect = document.getElementById('versionSelect');
@@ -202,7 +209,7 @@
                 formData.append('client_id', clientId);
                 formData.append('client_secret', clientSecret);
                 formData.append('grant_type', 'client_credentials');
-                formData.append('scope', 'emsi_open');
+                formData.append('scope', scopeSelect.value);
                 
                 const response = await fetch('https://auth.emsicloud.com/connect/token', {
                     method: 'POST',
