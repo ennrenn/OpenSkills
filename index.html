@@ -35,6 +35,7 @@
         }
         input, select {
             width: 100%;
+            box-sizing: border-box; /* Include padding and border in element's total width and height */
             padding: 8px;
             margin-bottom: 15px;
             border: 1px solid #ddd;
@@ -67,6 +68,7 @@
             margin-top: 10px;
             padding: 10px;
             border-radius: 4px;
+            word-wrap: break-word; /* Ensure long messages wrap */
         }
         .success {
             background-color: #d5f5e3;
@@ -105,37 +107,49 @@
         .filter-controls {
             margin-bottom: 15px;
         }
+         #hierarchyPreview ul {
+            list-style-type: none;
+            padding-left: 20px;
+        }
+        #hierarchyPreview li {
+            margin-bottom: 5px;
+        }
+        .toggle {
+            display: inline-block;
+            width: 1em;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <h1>Lightcast Skills Hierarchy Exporter</h1>
-    
+
     <div class="container">
         <div class="auth-section">
             <h2>1. API Authentication</h2>
             <label for="clientId">Client ID:</label>
             <input type="text" id="clientId" placeholder="Enter your client_id">
-            
+
             <label for="clientSecret">Client Secret:</label>
             <input type="password" id="clientSecret" placeholder="Enter your client_secret">
-            
+
             <label for="scopeSelect">API Scope:</label>
             <select id="scopeSelect">
                 <option value="emsi_open">emsi_open</option>
                 <option value="lightcast_open_free">lightcast_open_free</option>
             </select>
-            
+
             <button id="authenticateBtn">Authenticate</button>
             <div id="authStatus" class="status"></div>
         </div>
-        
+
         <div class="version-section">
             <h2>2. Select Version & Configure</h2>
             <label for="versionSelect">Skills Taxonomy Version:</label>
             <select id="versionSelect" disabled>
                 <option value="latest">Loading versions...</option>
             </select>
-            
+
             <button id="fetchSkillsBtn" disabled>Fetch Skills</button>
             <div id="fetchStatus" class="status"></div>
             <div id="loadingSpinner">
@@ -144,7 +158,7 @@
             </div>
             <div id="resultStats"></div>
         </div>
-        
+
         <div class="export-section">
             <h2>3. Export Skills Hierarchy</h2>
             <div class="filter-controls">
@@ -153,7 +167,7 @@
                     <option value="all">All Types</option>
                 </select>
             </div>
-            
+
             <div class="export-options">
                 <button id="exportJsonBtn" disabled>Export as JSON</button>
                 <button id="exportCsvBtn" disabled>Export as CSV</button>
@@ -161,7 +175,7 @@
             </div>
             <div id="exportStatus" class="status"></div>
         </div>
-        
+
         <div id="previewSection" style="display: none;">
             <h2>Hierarchy Preview</h2>
             <div id="hierarchyPreview" style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; background-color: #fff;"></div>
@@ -173,7 +187,7 @@
         let accessToken = null;
         let skillsData = [];
         let skillTypes = [];
-        let categories = {};
+        // Removed 'categories' global as hierarchyData holds the structure
         let hierarchyData = {};
 
         // DOM Elements
@@ -203,26 +217,25 @@
         viewPreviewBtn.addEventListener('click', togglePreview);
         skillTypeFilter.addEventListener('change', filterHierarchy);
 
-        // Authentication function
+        // --- Authentication ---
         async function authenticate() {
             const clientId = clientIdInput.value.trim();
             const clientSecret = clientSecretInput.value.trim();
-            
+
             if (!clientId || !clientSecret) {
                 updateStatus(authStatus, 'Please enter both Client ID and Client Secret.', 'error');
                 return;
             }
-            
+
             try {
                 updateStatus(authStatus, 'Authenticating...', 'progress');
-                
-                // Prepare form data for token request
+
                 const formData = new URLSearchParams();
                 formData.append('client_id', clientId);
                 formData.append('client_secret', clientSecret);
                 formData.append('grant_type', 'client_credentials');
                 formData.append('scope', scopeSelect.value);
-                
+
                 const response = await fetch('https://auth.emsicloud.com/connect/token', {
                     method: 'POST',
                     headers: {
@@ -230,22 +243,24 @@
                     },
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.access_token) {
                     accessToken = data.access_token;
                     updateStatus(authStatus, 'Authentication successful! Token expires in ' + data.expires_in + ' seconds.', 'success');
-                    enableVersionSelection();
+                    await enableVersionSelection(); // Fetch versions after success
                 } else {
-                    updateStatus(authStatus, 'Authentication failed: ' + (data.error_description || 'Unknown error'), 'error');
+                    updateStatus(authStatus, 'Authentication failed: ' + (data.error_description || data.error || 'Unknown error'), 'error');
+                    resetAppState(); // Reset if auth fails
                 }
             } catch (error) {
                 updateStatus(authStatus, 'Authentication error: ' + error.message, 'error');
+                 resetAppState(); // Reset on error
             }
         }
 
-        // Enable version selection after authentication
+        // --- Fetch Versions ---
         async function enableVersionSelection() {
             try {
                 const response = await fetch('https://emsiservices.com/skills/versions', {
@@ -253,141 +268,155 @@
                         'Authorization': 'Bearer ' + accessToken
                     }
                 });
-                
+                 if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
-                
+
                 if (data.data && data.data.length > 0) {
-                    // Clear existing options
-                    versionSelect.innerHTML = '';
-                    
-                    // Add "latest" option
+                    versionSelect.innerHTML = ''; // Clear existing
+
                     const latestOption = document.createElement('option');
                     latestOption.value = 'latest';
                     latestOption.textContent = 'latest (recommended)';
                     versionSelect.appendChild(latestOption);
-                    
-                    // Add version options
+
+                    // Add other versions, typically sorted descending by API
                     data.data.forEach(version => {
                         const option = document.createElement('option');
                         option.value = version;
                         option.textContent = version;
                         versionSelect.appendChild(option);
                     });
-                    
+
                     versionSelect.disabled = false;
                     fetchSkillsBtn.disabled = false;
+                } else {
+                     updateStatus(authStatus, 'No versions found.', 'error');
+                     resetAppState();
                 }
             } catch (error) {
                 updateStatus(authStatus, 'Error fetching versions: ' + error.message, 'error');
+                 resetAppState();
             }
         }
 
-        // Fetch skills data
+        // --- Fetch Skills and Build Hierarchy ---
         async function fetchSkills() {
             const selectedVersion = versionSelect.value;
-            
+            resetExportState(); // Reset previous results/buttons
+            updateStatus(fetchStatus, 'Starting skill fetch...', 'progress');
+            loadingSpinner.style.display = 'block';
+            resultStats.textContent = '';
+
+
             try {
-                // First, get the skill types for this version
-                updateStatus(fetchStatus, 'Fetching skill types...', 'progress');
-                loadingSpinner.style.display = 'block';
-                
+                // 1. Get version metadata (fields, types)
+                updateStatus(fetchStatus, 'Fetching version metadata...', 'progress');
                 const versionResponse = await fetch(`https://emsiservices.com/skills/versions/${selectedVersion}`, {
                     headers: {
                         'Authorization': 'Bearer ' + accessToken
                     }
                 });
-                
+                 if (!versionResponse.ok) {
+                    const errorData = await versionResponse.json().catch(() => ({})); // Try to get error details
+                    throw new Error(`HTTP error ${versionResponse.status} fetching version metadata: ${errorData.error?.message || 'Unknown error'}`);
+                }
                 const versionData = await versionResponse.json();
-                
+
+                let availableFields = [];
+                if (versionData.data && versionData.data.fields) {
+                    availableFields = versionData.data.fields;
+                } else {
+                     throw new Error('Could not retrieve available fields for this version.');
+                }
+
                 if (versionData.data && versionData.data.types) {
                     skillTypes = versionData.data.types;
-                    
-                    // Populate skill type filter
-                    skillTypeFilter.innerHTML = '<option value="all">All Types</option>';
-                    skillTypes.forEach(type => {
-                        if (type.id !== 'ST0') { // Skip "Removed" type
-                            const option = document.createElement('option');
-                            option.value = type.id;
-                            option.textContent = type.name;
-                            skillTypeFilter.appendChild(option);
-                        }
-                    });
+                    populateSkillTypeFilter(skillTypes);
+                } else {
+                     console.warn('Could not retrieve skill types for this version.');
+                     skillTypes = [];
+                     populateSkillTypeFilter([]); // Populate with default
                 }
-                
-                // Now fetch all skills with full fields
-                updateStatus(fetchStatus, 'Fetching skills data... This may take a minute.', 'progress');
-                
-                // Determine what fields we want to retrieve
-                const fields = versionData.data.fields.join(',');
-                
-                // Fetch all skills
-                const skillsResponse = await fetch(`https://emsiservices.com/skills/versions/${selectedVersion}/skills?fields=${fields}&limit=50000`, {
-                    headers: {
+
+                // 2. Fetch all skills for the version using all available fields
+                updateStatus(fetchStatus, 'Fetching skills data (limit 50k)... This may take a minute.', 'progress');
+                const fieldsQueryParam = availableFields.join(',');
+                // Note: API might have an internal limit lower than 50k. Real pagination would be better for production.
+                const skillsResponse = await fetch(`https://emsiservices.com/skills/versions/${selectedVersion}/skills?fields=${fieldsQueryParam}&limit=50000`, {
+                     headers: {
                         'Authorization': 'Bearer ' + accessToken
                     }
                 });
-                
+                 if (!skillsResponse.ok) {
+                     const errorData = await skillsResponse.json().catch(() => ({}));
+                     throw new Error(`HTTP error ${skillsResponse.status} fetching skills: ${errorData.error?.message || 'Unknown error'}`);
+                }
                 const skillsResult = await skillsResponse.json();
-                
-                if (skillsResult.data) {
+
+                if (skillsResult.data && Array.isArray(skillsResult.data)) {
                     skillsData = skillsResult.data;
                     updateStatus(fetchStatus, `Successfully fetched ${skillsData.length} skills!`, 'success');
-                    resultStats.textContent = `Total skills: ${skillsData.length}`;
-                    
-                    // Create hierarchy
-                    buildHierarchy();
-                    
-                    // Enable export buttons
+                    resultStats.textContent = `Total skills fetched: ${skillsData.length}`;
+
+                    buildHierarchy(); // Build the hierarchy structure
+
+                    // Enable export and preview buttons
                     exportJsonBtn.disabled = false;
                     exportCsvBtn.disabled = false;
                     viewPreviewBtn.disabled = false;
+                    skillTypeFilter.disabled = false; // Enable filter
+
                 } else {
-                    updateStatus(fetchStatus, 'No skills data found.', 'error');
+                    updateStatus(fetchStatus, 'No skills data returned or data is not an array.', 'error');
+                    skillsData = []; // Ensure skillsData is empty
+                    resultStats.textContent = 'Total skills fetched: 0';
                 }
             } catch (error) {
                 updateStatus(fetchStatus, 'Error fetching skills: ' + error.message, 'error');
+                skillsData = []; // Clear data on error
+                resetExportState(); // Disable buttons etc.
             } finally {
                 loadingSpinner.style.display = 'none';
             }
         }
 
-        // Build the skills hierarchy
-        // Build the skills hierarchy
+        // *** CORRECTED buildHierarchy Function ***
         function buildHierarchy() {
             // Reset hierarchy data
             hierarchyData = {
                 version: versionSelect.value,
                 fetchDate: new Date().toISOString(),
-                types: skillTypes,
-                categories: {} // Use category NAME as key
+                types: skillTypes, // Store the fetched types
+                categories: {}, // Use category NAME as key
+                uncategorized: [] // Initialize uncategorized
             };
 
             // Group skills by category and subcategory
             skillsData.forEach(skill => {
-                // --- Check if category exists and get its NAME ---
-                const categoryName = skill.category ? skill.category.name : null; // Get name string
+                // Safely get category name string (or null if no category)
+                const categoryName = skill.category && typeof skill.category === 'object' ? skill.category.name : null;
 
+                // Handle skills without a valid category object/name
                 if (!categoryName) {
-                    // Skills without category
-                    if (!hierarchyData.uncategorized) {
-                        hierarchyData.uncategorized = [];
-                    }
                     hierarchyData.uncategorized.push(skill);
-                    return;
+                    return; // Move to next skill
                 }
 
-                // --- Check if subcategory exists and get its NAME ---
-                const subcategoryName = skill.subcategory ? skill.subcategory.name : null; // Get name string
+                // Safely get subcategory name string (or null if no subcategory)
+                const subcategoryName = skill.subcategory && typeof skill.subcategory === 'object' ? skill.subcategory.name : null;
 
                 // Initialize category using its NAME as the key if it doesn't exist
                 if (!hierarchyData.categories[categoryName]) {
                     hierarchyData.categories[categoryName] = {
                         name: categoryName, // Store the name string
-                        subcategories: {}   // Use subcategory NAME as key
+                        subcategories: {},   // Use subcategory NAME as key
+                        skills: []           // Initialize direct skills array
                     };
                 }
 
-                // If skill has a subcategory
+                // If skill has a valid subcategory name
                 if (subcategoryName) {
                     // Initialize subcategory using its NAME as the key if it doesn't exist
                     if (!hierarchyData.categories[categoryName].subcategories[subcategoryName]) {
@@ -399,484 +428,447 @@
                     // Add skill to the correct subcategory (identified by name)
                     hierarchyData.categories[categoryName].subcategories[subcategoryName].skills.push(skill);
                 } else {
-                    // Skills with category but no subcategory
-                    if (!hierarchyData.categories[categoryName].skills) {
-                        hierarchyData.categories[categoryName].skills = [];
-                    }
-                     // Add skill directly to the category (identified by name)
+                    // Skill has category but no (or invalid) subcategory - add to category's direct skills
                     hierarchyData.categories[categoryName].skills.push(skill);
                 }
             });
-             console.log("Built Hierarchy:", hierarchyData); // Add for debugging if needed
+            // console.log("Built Hierarchy:", JSON.stringify(hierarchyData, null, 2)); // Deep log for debugging
         }
 
-        // Filter hierarchy based on skill type
+
+        // --- Filtering and Preview ---
+
+        function populateSkillTypeFilter(types) {
+             skillTypeFilter.innerHTML = '<option value="all">All Types</option>';
+             if (!types || types.length === 0) {
+                 skillTypeFilter.disabled = true;
+                 return;
+             }
+             skillTypeFilter.disabled = false;
+             types.forEach(type => {
+                 // As per docs, ST0 is "Removed", usually not needed for filtering active skills
+                 if (type.id !== 'ST0') {
+                     const option = document.createElement('option');
+                     option.value = type.id;
+                     // Use description attribute if needed, but name is usually sufficient
+                     option.textContent = `${type.name} (${type.id})`;
+                     skillTypeFilter.appendChild(option);
+                 }
+             });
+        }
+
         function filterHierarchy() {
-            const typeId = skillTypeFilter.value;
-            createHierarchyPreview(typeId);
+             // If preview is visible, update it
+             if (previewSection.style.display !== 'none') {
+                createHierarchyPreview(skillTypeFilter.value);
+             }
+             // Reset export status when filter changes
+             updateStatus(exportStatus, '', '');
         }
 
-        // Create a preview of the hierarchy
         function createHierarchyPreview(typeFilter = 'all') {
-            hierarchyPreview.innerHTML = '';
-            
-            // Count skills
-            let totalSkills = 0;
-            let filteredSkills = 0;
-            
-            // Create a representation of the hierarchy
-            const createCategoryList = document.createElement('ul');
-            
-            // Sort categories alphabetically
-            const sortedCategories = Object.keys(hierarchyData.categories).sort();
-            
-            sortedCategories.forEach(categoryKey => {
-                const category = hierarchyData.categories[categoryKey];
-                const categoryItem = document.createElement('li');
-                
-                // Create collapsible section for each category
-                const categoryHeader = document.createElement('div');
-                categoryHeader.style.fontWeight = 'bold';
-                categoryHeader.style.cursor = 'pointer';
-                categoryHeader.innerHTML = `<span class="toggle">▼</span> ${category.name}`;
-                
-                // Count skills in this category
-                let categorySkillCount = 0;
-                let categoryFilteredCount = 0;
-                
-                // Count category's direct skills
-                if (category.skills) {
-                    categorySkillCount += category.skills.length;
-                    
-                    // Filter by skill type if needed
-                    if (typeFilter !== 'all') {
-                        const filteredDirectSkills = category.skills.filter(
-                            skill => skill.type && skill.type.id === typeFilter
-                        );
-                        categoryFilteredCount += filteredDirectSkills.length;
-                    } else {
-                        categoryFilteredCount += category.skills.length;
-                    }
-                }
-                
-                // Count skills in subcategories
-                const subcategoriesList = document.createElement('ul');
-                subcategoriesList.style.display = 'block'; // Start expanded
-                
-                // Sort subcategories alphabetically
-                const sortedSubcategories = Object.keys(category.subcategories).sort();
-                
-                sortedSubcategories.forEach(subKey => {
-                    const subcategory = category.subcategories[subKey];
-                    categorySkillCount += subcategory.skills.length;
-                    
-                    // Filter by skill type if needed
-                    let subcategoryFilteredSkills = subcategory.skills;
-                    if (typeFilter !== 'all') {
-                        subcategoryFilteredSkills = subcategory.skills.filter(
-                            skill => skill.type && skill.type.id === typeFilter
-                        );
-                    }
-                    
-                    categoryFilteredCount += subcategoryFilteredSkills.length;
-                    
-                    // Only show subcategories that have matching skills after filtering
-                    if (subcategoryFilteredSkills.length > 0) {
-                        const subcategoryItem = document.createElement('li');
-                        
-                        // Create subcategory header with toggle
-                        const subcategoryHeader = document.createElement('div');
-                        subcategoryHeader.style.fontWeight = 'bold';
-                        subcategoryHeader.style.cursor = 'pointer';
-                        subcategoryHeader.innerHTML = `<span class="toggle">▼</span> ${subcategory.name} (${subcategoryFilteredSkills.length} skills)`;
-                        
-                        // Create skills list for this subcategory
-                        const skillsList = document.createElement('ul');
-                        skillsList.style.display = 'block'; // Start expanded
-                        
-                        // Add skills
-                        subcategoryFilteredSkills.forEach(skill => {
-                            const skillItem = document.createElement('li');
-                            const skillType = skill.type ? skill.type.name : 'Unknown';
-                            skillItem.textContent = `${skill.name} (${skillType})`;
-                            skillsList.appendChild(skillItem);
-                        });
-                        
-                        // Add toggle event
-                        subcategoryHeader.addEventListener('click', function() {
-                            const toggle = this.querySelector('.toggle');
-                            if (skillsList.style.display === 'none') {
-                                skillsList.style.display = 'block';
-                                toggle.textContent = '▼';
-                            } else {
-                                skillsList.style.display = 'none';
-                                toggle.textContent = '►';
-                            }
-                        });
-                        
-                        subcategoryItem.appendChild(subcategoryHeader);
-                        subcategoryItem.appendChild(skillsList);
-                        subcategoriesList.appendChild(subcategoryItem);
-                    }
-                });
-                
-                // Add category's direct skills if they match the filter
-                if (category.skills && category.skills.length > 0) {
-                    let directSkills = category.skills;
-                    if (typeFilter !== 'all') {
-                        directSkills = category.skills.filter(
-                            skill => skill.type && skill.type.id === typeFilter
-                        );
-                    }
-                    
-                    if (directSkills.length > 0) {
-                        const directSkillsItem = document.createElement('li');
-                        
-                        // Create direct skills header
-                        const directSkillsHeader = document.createElement('div');
-                        directSkillsHeader.style.fontWeight = 'bold';
-                        directSkillsHeader.style.cursor = 'pointer';
-                        directSkillsHeader.innerHTML = `<span class="toggle">▼</span> Direct Skills (${directSkills.length})`;
-                        
-                        // Create skills list
-                        const directSkillsList = document.createElement('ul');
-                        directSkillsList.style.display = 'block'; // Start expanded
-                        
-                        // Add skills
-                        directSkills.forEach(skill => {
-                            const skillItem = document.createElement('li');
-                            const skillType = skill.type ? skill.type.name : 'Unknown';
-                            skillItem.textContent = `${skill.name} (${skillType})`;
-                            directSkillsList.appendChild(skillItem);
-                        });
-                        
-                        // Add toggle event
-                        directSkillsHeader.addEventListener('click', function() {
-                            const toggle = this.querySelector('.toggle');
-                            if (directSkillsList.style.display === 'none') {
-                                directSkillsList.style.display = 'block';
-                                toggle.textContent = '▼';
-                            } else {
-                                directSkillsList.style.display = 'none';
-                                toggle.textContent = '►';
-                            }
-                        });
-                        
-                        directSkillsItem.appendChild(directSkillsHeader);
-                        directSkillsItem.appendChild(directSkillsList);
-                        subcategoriesList.appendChild(directSkillsItem);
-                    }
-                }
-                
-                totalSkills += categorySkillCount;
-                filteredSkills += categoryFilteredCount;
-                
-                // Only show categories that have skills after filtering
-                if (categoryFilteredCount > 0) {
-                    categoryHeader.innerHTML = `<span class="toggle">▼</span> ${category.name} (${categoryFilteredCount} of ${categorySkillCount} skills)`;
-                    
-                    // Add toggle event
-                    categoryHeader.addEventListener('click', function() {
-                        const toggle = this.querySelector('.toggle');
-                        if (subcategoriesList.style.display === 'none') {
-                            subcategoriesList.style.display = 'block';
-                            toggle.textContent = '▼';
-                        } else {
-                            subcategoriesList.style.display = 'none';
-                            toggle.textContent = '►';
-                        }
-                    });
-                    
-                    categoryItem.appendChild(categoryHeader);
-                    categoryItem.appendChild(subcategoriesList);
-                    createCategoryList.appendChild(categoryItem);
-                }
-            });
-            
-            // Show uncategorized skills if they exist and match filter
-            if (hierarchyData.uncategorized && hierarchyData.uncategorized.length > 0) {
-                let uncategorizedSkills = hierarchyData.uncategorized;
-                if (typeFilter !== 'all') {
-                    uncategorizedSkills = hierarchyData.uncategorized.filter(
-                        skill => skill.type && skill.type.id === typeFilter
-                    );
-                }
-                
-                if (uncategorizedSkills.length > 0) {
-                    const uncategorizedItem = document.createElement('li');
-                    
-                    // Create uncategorized header
-                    const uncategorizedHeader = document.createElement('div');
-                    uncategorizedHeader.style.fontWeight = 'bold';
-                    uncategorizedHeader.style.cursor = 'pointer';
-                    uncategorizedHeader.innerHTML = `<span class="toggle">▼</span> Uncategorized Skills (${uncategorizedSkills.length})`;
-                    
-                    // Create skills list
-                    const uncategorizedList = document.createElement('ul');
-                    uncategorizedList.style.display = 'block'; // Start expanded
-                    
-                    // Add skills
-                    uncategorizedSkills.forEach(skill => {
-                        const skillItem = document.createElement('li');
-                        const skillType = skill.type ? skill.type.name : 'Unknown';
-                        skillItem.textContent = `${skill.name} (${skillType})`;
-                        uncategorizedList.appendChild(skillItem);
-                    });
-                    
-                    // Add toggle event
-                    uncategorizedHeader.addEventListener('click', function() {
-                        const toggle = this.querySelector('.toggle');
-                        if (uncategorizedList.style.display === 'none') {
-                            uncategorizedList.style.display = 'block';
-                            toggle.textContent = '▼';
-                        } else {
-                            uncategorizedList.style.display = 'none';
-                            toggle.textContent = '►';
-                        }
-                    });
-                    
-                    uncategorizedItem.appendChild(uncategorizedHeader);
-                    uncategorizedItem.appendChild(uncategorizedList);
-                    createCategoryList.appendChild(uncategorizedItem);
-                    
-                    totalSkills += hierarchyData.uncategorized.length;
-                    filteredSkills += uncategorizedSkills.length;
-                }
+            hierarchyPreview.innerHTML = ''; // Clear previous preview
+
+            if (!hierarchyData || !hierarchyData.categories) {
+                 hierarchyPreview.innerHTML = '<p>No hierarchy data available to preview.</p>';
+                 return;
             }
-            
-            // Show stats
+
+            let totalSkillCount = 0;
+            let filteredSkillCount = 0;
+
+            const rootList = document.createElement('ul');
+
+            const createListItem = (item, level = 0) => {
+                const li = document.createElement('li');
+                const header = document.createElement('div');
+                header.style.fontWeight = 'bold';
+                header.style.cursor = 'pointer';
+                header.style.marginLeft = `${level * 15}px`; // Indentation
+
+                let currentItemSkills = [];
+                let currentItemFilteredSkills = [];
+
+                // Determine if it's a category, subcategory, or skill node
+                if (item.subcategories !== undefined) { // Category node
+                    currentItemSkills = item.skills || []; // Direct skills
+                    Object.values(item.subcategories).forEach(sub => {
+                        currentItemSkills = currentItemSkills.concat(sub.skills || []);
+                    });
+                } else if (item.skills !== undefined) { // Subcategory node or direct skill list node
+                    currentItemSkills = item.skills || [];
+                } else { // Should be a single skill (though preview groups them)
+                    // This case isn't directly handled by this structure, skills are under categories/subcategories
+                     return null;
+                }
+
+                totalSkillCount += currentItemSkills.length; // Add to total (can lead to double counting if not careful, better to count leafs)
+
+                // Apply filter
+                currentItemFilteredSkills = currentItemSkills.filter(skill =>
+                    typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)
+                );
+                 filteredSkillCount += currentItemFilteredSkills.length; // Add to filtered count
+
+                 // Only render if there are skills after filtering
+                if (currentItemFilteredSkills.length === 0 && typeFilter !== 'all') {
+                     return null; // Don't show empty branches when filtering
+                }
+
+
+                const childrenList = document.createElement('ul');
+                childrenList.style.display = 'none'; // Start collapsed
+
+
+                // Add subcategories or direct skills
+                 if (item.subcategories && Object.keys(item.subcategories).length > 0) { // Category with Subcategories
+                     header.innerHTML = `<span class="toggle">►</span> ${item.name} (${currentItemFilteredSkills.length} skills)`;
+
+                     Object.values(item.subcategories).sort((a, b) => a.name.localeCompare(b.name)).forEach(sub => {
+                        const subLi = createListItem(sub, level + 1);
+                        if (subLi) childrenList.appendChild(subLi);
+                     });
+                     // Add direct skills if any
+                     if (item.skills && item.skills.length > 0) {
+                         const directSkillsNode = { name: "Direct Skills", skills: item.skills };
+                         const directLi = createListItem(directSkillsNode, level + 1);
+                         if (directLi) childrenList.appendChild(directLi);
+                     }
+
+                } else if (item.skills) { // Subcategory or Direct Skills Node
+                     header.innerHTML = `<span class="toggle">►</span> ${item.name} (${currentItemFilteredSkills.length} skills)`;
+                     currentItemFilteredSkills
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .forEach(skill => {
+                            const skillLi = document.createElement('li');
+                            skillLi.style.marginLeft = `${(level + 1) * 15}px`;
+                            const skillTypeName = skill.type ? skill.type.name : 'Unknown Type';
+                            skillLi.textContent = `${skill.name} (${skillTypeName})`;
+                            childrenList.appendChild(skillLi);
+                     });
+                }
+
+
+                 // Toggle functionality
+                header.addEventListener('click', function(e) {
+                    e.stopPropagation(); // Prevent parent toggles
+                    const toggle = this.querySelector('.toggle');
+                    const isExpanded = childrenList.style.display === 'block';
+                    childrenList.style.display = isExpanded ? 'none' : 'block';
+                    toggle.textContent = isExpanded ? '►' : '▼';
+                });
+
+                li.appendChild(header);
+                 // Only add children list if it contains items
+                 if (childrenList.hasChildNodes()) {
+                     li.appendChild(childrenList);
+                 }
+
+
+                return li;
+            };
+
+
+             // Process Categories
+            Object.values(hierarchyData.categories)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .forEach(category => {
+                    const categoryLi = createListItem(category, 0);
+                    if (categoryLi) rootList.appendChild(categoryLi);
+            });
+
+            // Process Uncategorized
+             if (hierarchyData.uncategorized && hierarchyData.uncategorized.length > 0) {
+                 const uncategorizedNode = { name: "Uncategorized", skills: hierarchyData.uncategorized };
+                 const uncategorizedLi = createListItem(uncategorizedNode, 0);
+                 if (uncategorizedLi) rootList.appendChild(uncategorizedLi);
+             }
+
+            // Calculate correct counts by iterating through final filtered skills
+             let finalFilteredCount = 0;
+             const countSkills = (node) => {
+                 if(node.skills) {
+                    node.skills.forEach(skill => {
+                        if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
+                            finalFilteredCount++;
+                        }
+                    });
+                 }
+                 if(node.subcategories) {
+                     Object.values(node.subcategories).forEach(countSkills);
+                 }
+             };
+             Object.values(hierarchyData.categories).forEach(countSkills);
+             if (hierarchyData.uncategorized) {
+                 countSkills({ skills: hierarchyData.uncategorized });
+             }
+
+
+            // Add Stats and the list
             const statsElement = document.createElement('div');
-            statsElement.innerHTML = `<p>Showing ${filteredSkills} of ${totalSkills} total skills</p>`;
-            
-            // Add to preview
+            statsElement.style.marginBottom = '10px';
+            statsElement.innerHTML = `<p>Showing ${finalFilteredCount} skills ${typeFilter !== 'all' ? `of type '${skillTypeFilter.options[skillTypeFilter.selectedIndex].text}'` : '(all types)'}. Total skills fetched: ${skillsData.length}.</p>`;
             hierarchyPreview.appendChild(statsElement);
-            hierarchyPreview.appendChild(createCategoryList);
+
+            if (rootList.hasChildNodes()) {
+                hierarchyPreview.appendChild(rootList);
+            } else {
+                 hierarchyPreview.appendChild(document.createTextNode('No skills match the current filter.'));
+            }
         }
 
-        // Toggle hierarchy preview
+
         function togglePreview() {
             if (previewSection.style.display === 'none') {
                 previewSection.style.display = 'block';
-                createHierarchyPreview(skillTypeFilter.value);
+                createHierarchyPreview(skillTypeFilter.value); // Generate preview based on current filter
                 viewPreviewBtn.textContent = 'Hide Hierarchy Preview';
+                 updateStatus(exportStatus, '', ''); // Clear export status when showing preview
             } else {
                 previewSection.style.display = 'none';
                 viewPreviewBtn.textContent = 'View Hierarchy Preview';
             }
         }
 
-        // Export skills as JSON
-        function exportSkillsJson() {
-            try {
-                // Create a filtered version if needed
-                let dataToExport = hierarchyData;
-                const typeFilter = skillTypeFilter.value;
-                
-                if (typeFilter !== 'all') {
-                    // Create a deep clone of the hierarchy
-                    const filteredData = {
-                        version: hierarchyData.version,
-                        fetchDate: hierarchyData.fetchDate,
-                        types: hierarchyData.types,
-                        categories: {}
-                    };
-                    
-                    // Filter categories and subcategories
-                    Object.keys(hierarchyData.categories).forEach(categoryKey => {
-                        const category = hierarchyData.categories[categoryKey];
-                        const filteredCategory = {
-                            name: category.name,
-                            subcategories: {}
-                        };
-                        
-                        // Filter direct skills
-                        if (category.skills) {
-                            const filteredSkills = category.skills.filter(
-                                skill => skill.type && skill.type.id === typeFilter
-                            );
-                            
-                            if (filteredSkills.length > 0) {
-                                filteredCategory.skills = filteredSkills;
-                            }
-                        }
-                        
-                        // Filter subcategories
-                        Object.keys(category.subcategories).forEach(subKey => {
-                            const subcategory = category.subcategories[subKey];
-                            const filteredSkills = subcategory.skills.filter(
-                                skill => skill.type && skill.type.id === typeFilter
-                            );
-                            
-                            if (filteredSkills.length > 0) {
-                                filteredCategory.subcategories[subKey] = {
-                                    name: subcategory.name,
-                                    skills: filteredSkills
-                                };
-                            }
-                        });
-                        
-                        // Only add category if it has any skills after filtering
-                        if ((filteredCategory.skills && filteredCategory.skills.length > 0) || 
-                            Object.keys(filteredCategory.subcategories).length > 0) {
-                            filteredData.categories[categoryKey] = filteredCategory;
-                        }
-                    });
-                    
-                    // Filter uncategorized skills
-                    if (hierarchyData.uncategorized) {
-                        const filteredUncategorized = hierarchyData.uncategorized.filter(
-                            skill => skill.type && skill.type.id === typeFilter
-                        );
-                        
-                        if (filteredUncategorized.length > 0) {
-                            filteredData.uncategorized = filteredUncategorized;
-                        }
-                    }
-                    
-                    dataToExport = filteredData;
+        // --- Export Functions ---
+
+        function getFilteredData(typeFilter) {
+            if (typeFilter === 'all') {
+                return hierarchyData; // Return original if no filter
+            }
+
+            // Create a deep copy structure for filtering
+             const filteredData = {
+                version: hierarchyData.version,
+                fetchDate: hierarchyData.fetchDate,
+                types: hierarchyData.types,
+                categories: {},
+                uncategorized: []
+            };
+
+             // Filter categories
+            Object.keys(hierarchyData.categories).forEach(categoryKey => {
+                const category = hierarchyData.categories[categoryKey];
+                const newCategory = { name: category.name, subcategories: {}, skills: [] };
+                let categoryHasSkills = false;
+
+                // Filter direct skills
+                if (category.skills) {
+                    newCategory.skills = category.skills.filter(skill => skill.type && skill.type.id === typeFilter);
+                    if (newCategory.skills.length > 0) categoryHasSkills = true;
                 }
-                
-                // Convert to JSON string
+
+                // Filter subcategories
+                Object.keys(category.subcategories).forEach(subKey => {
+                    const subcategory = category.subcategories[subKey];
+                    const filteredSubSkills = subcategory.skills.filter(skill => skill.type && skill.type.id === typeFilter);
+
+                    if (filteredSubSkills.length > 0) {
+                        newCategory.subcategories[subKey] = {
+                            name: subcategory.name,
+                            skills: filteredSubSkills
+                        };
+                        categoryHasSkills = true;
+                    }
+                });
+
+                // Add category only if it contains skills matching the filter
+                if (categoryHasSkills) {
+                    filteredData.categories[categoryKey] = newCategory;
+                }
+            });
+
+            // Filter uncategorized skills
+             if (hierarchyData.uncategorized) {
+                filteredData.uncategorized = hierarchyData.uncategorized.filter(skill => skill.type && skill.type.id === typeFilter);
+            }
+
+            return filteredData;
+        }
+
+        function exportSkillsJson() {
+             updateStatus(exportStatus, 'Preparing JSON export...', 'progress');
+             try {
+                const typeFilter = skillTypeFilter.value;
+                const dataToExport = getFilteredData(typeFilter);
+
+                // Count actual skills in the filtered data
+                 let skillCount = 0;
+                 Object.values(dataToExport.categories).forEach(cat => {
+                     skillCount += (cat.skills || []).length;
+                     Object.values(cat.subcategories).forEach(sub => {
+                         skillCount += (sub.skills || []).length;
+                     });
+                 });
+                 skillCount += (dataToExport.uncategorized || []).length;
+
+                if (skillCount === 0) {
+                    updateStatus(exportStatus, 'No skills match the current filter. JSON export cancelled.', 'error');
+                    return;
+                }
+
                 const jsonString = JSON.stringify(dataToExport, null, 2);
-                
-                // Create a Blob and generate download link
-                const blob = new Blob([jsonString], { type: 'application/json' });
+                const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
-                
-                // Create a temporary link and trigger download
                 const link = document.createElement('a');
+                const typeSuffix = typeFilter === 'all' ? 'all-types' : typeFilter;
                 link.href = url;
-                link.download = `lightcast-skills-hierarchy-${dataToExport.version}-${new Date().toISOString().split('T')[0]}.json`;
+                link.download = `lightcast-skills-hierarchy-${dataToExport.version}-${typeSuffix}-${new Date().toISOString().split('T')[0]}.json`;
                 document.body.appendChild(link);
                 link.click();
-                
-                // Clean up
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
-                
-                updateStatus(exportStatus, 'Successfully exported skills hierarchy as JSON!', 'success');
-            } catch (error) {
+
+                updateStatus(exportStatus, `Successfully exported ${skillCount} skills as JSON!`, 'success');
+
+             } catch (error) {
+                console.error("JSON Export Error:", error);
                 updateStatus(exportStatus, 'Error exporting JSON: ' + error.message, 'error');
-            }
+             }
         }
-        
-        // Export skills as CSV with hierarchical structure
+
+
         function exportSkillsCsv() {
-            try {
+             updateStatus(exportStatus, 'Preparing CSV export...', 'progress');
+             try {
                 const typeFilter = skillTypeFilter.value;
-                
-                // CSV Header
-                let csvContent = "Category,Subcategory,Skill Name,Skill ID,Skill Type,Is Software,Is Language\n";
-                
-                // Process all categories
-                Object.keys(hierarchyData.categories).forEach(categoryKey => {
-                    const category = hierarchyData.categories[categoryKey];
-                    const categoryName = category.name;
-                    
+                const dataToExport = getFilteredData(typeFilter); // Get potentially filtered data
+
+                // CSV Header - Added Skill Description if available
+                const headers = ["Category", "Subcategory", "Skill Name", "Skill ID", "Skill Type Name", "Skill Type ID", "Description", "Is Software", "Is Language"];
+                let csvContent = headers.map(escapeForCsv).join(',') + "\n";
+                let skillCount = 0;
+
+                 // Process Categories
+                 Object.values(dataToExport.categories).forEach(category => {
+                    const categoryName = category.name || '';
+
                     // Process direct skills in category
-                    if (category.skills && category.skills.length > 0) {
-                        category.skills.forEach(skill => {
-                            // Apply type filter if needed
-                            if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
-                                const skillType = skill.type ? skill.type.name : "Unknown";
-                                const isSoftware = skill.isSoftware ? "Yes" : "No";
-                                const isLanguage = skill.isLanguage ? "Yes" : "No";
-                                
-                                // Escape fields for CSV
-                                const escapedCategory = escapeForCsv(categoryName);
-                                const escapedSkillName = escapeForCsv(skill.name);
-                                
-                                // Add row: Category, Subcategory (empty), Skill Name, Skill ID, Skill Type, Is Software, Is Language
-                                csvContent += `${escapedCategory},,${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
-                            }
-                        });
-                    }
-                    
+                    (category.skills || []).forEach(skill => {
+                         csvContent += createCsvRow(categoryName, '', skill);
+                         skillCount++;
+                    });
+
                     // Process skills in subcategories
-                    Object.keys(category.subcategories).forEach(subKey => {
-                        const subcategory = category.subcategories[subKey];
-                        const subcategoryName = subcategory.name;
-                        
-                        subcategory.skills.forEach(skill => {
-                            // Apply type filter if needed
-                            if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
-                                const skillType = skill.type ? skill.type.name : "Unknown";
-                                const isSoftware = skill.isSoftware ? "Yes" : "No";
-                                const isLanguage = skill.isLanguage ? "Yes" : "No";
-                                
-                                // Escape fields for CSV
-                                const escapedCategory = escapeForCsv(categoryName);
-                                const escapedSubcategory = escapeForCsv(subcategoryName);
-                                const escapedSkillName = escapeForCsv(skill.name);
-                                
-                                // Add row: Category, Subcategory, Skill Name, Skill ID, Skill Type, Is Software, Is Language
-                                csvContent += `${escapedCategory},${escapedSubcategory},${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
-                            }
-                        });
+                    Object.values(category.subcategories).forEach(subcategory => {
+                         const subcategoryName = subcategory.name || '';
+                         (subcategory.skills || []).forEach(skill => {
+                             csvContent += createCsvRow(categoryName, subcategoryName, skill);
+                              skillCount++;
+                         });
                     });
-                });
-                
-                // Process uncategorized skills
-                if (hierarchyData.uncategorized && hierarchyData.uncategorized.length > 0) {
-                    hierarchyData.uncategorized.forEach(skill => {
-                        // Apply type filter if needed
-                        if (typeFilter === 'all' || (skill.type && skill.type.id === typeFilter)) {
-                            const skillType = skill.type ? skill.type.name : "Unknown";
-                            const isSoftware = skill.isSoftware ? "Yes" : "No";
-                            const isLanguage = skill.isLanguage ? "Yes" : "No";
-                            
-                            // Escape fields for CSV
-                            const escapedSkillName = escapeForCsv(skill.name);
-                            
-                            // Add row: Category (Uncategorized), Subcategory (empty), Skill Name, Skill ID, Skill Type, Is Software, Is Language
-                            csvContent += `Uncategorized,,${escapedSkillName},${skill.id},${skillType},${isSoftware},${isLanguage}\n`;
-                        }
-                    });
-                }
-                
-                // Create a Blob and generate download link
+                 });
+
+                 // Process Uncategorized skills
+                (dataToExport.uncategorized || []).forEach(skill => {
+                     csvContent += createCsvRow('Uncategorized', '', skill);
+                     skillCount++;
+                 });
+
+
+                 if (skillCount === 0) {
+                    updateStatus(exportStatus, 'No skills match the current filter. CSV export cancelled.', 'error');
+                    return;
+                 }
+
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
-                
-                // Create a temporary link and trigger download
                 const link = document.createElement('a');
+                 const typeSuffix = typeFilter === 'all' ? 'all-types' : typeFilter;
                 link.href = url;
-                link.download = `lightcast-skills-hierarchy-${hierarchyData.version}-${new Date().toISOString().split('T')[0]}.csv`;
+                link.download = `lightcast-skills-hierarchy-${dataToExport.version}-${typeSuffix}-${new Date().toISOString().split('T')[0]}.csv`;
                 document.body.appendChild(link);
                 link.click();
-                
-                // Clean up
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
-                
-                updateStatus(exportStatus, 'Successfully exported skills hierarchy as CSV!', 'success');
-            } catch (error) {
-                updateStatus(exportStatus, 'Error exporting CSV: ' + error.message, 'error');
-            }
+
+                updateStatus(exportStatus, `Successfully exported ${skillCount} skills as CSV!`, 'success');
+
+             } catch (error) {
+                 console.error("CSV Export Error:", error);
+                 updateStatus(exportStatus, 'Error exporting CSV: ' + error.message, 'error');
+             }
         }
-        
+
+        function createCsvRow(categoryName, subcategoryName, skill) {
+             const skillName = skill.name || '';
+             const skillId = skill.id || '';
+             const skillTypeName = (skill.type && skill.type.name) ? skill.type.name : 'Unknown';
+             const skillTypeId = (skill.type && skill.type.id) ? skill.type.id : '';
+             // Extract description from tags if available
+             let skillDescription = skill.description || ''; // Use direct description field first
+            // Fallback to Wikipedia tag if direct description is empty
+             if (!skillDescription && skill.tags && Array.isArray(skill.tags)) {
+                 const wikipediaTag = skill.tags.find(tag => tag.key === 'wikipediaExtract');
+                 if (wikipediaTag) {
+                     skillDescription = wikipediaTag.value || '';
+                 }
+             }
+
+             const isSoftware = skill.isSoftware ? "Yes" : "No";
+             const isLanguage = skill.isLanguage ? "Yes" : "No";
+
+             const row = [
+                 categoryName,
+                 subcategoryName,
+                 skillName,
+                 skillId,
+                 skillTypeName,
+                 skillTypeId,
+                 skillDescription, // Added Description
+                 isSoftware,
+                 isLanguage
+             ];
+
+             return row.map(escapeForCsv).join(',') + "\n";
+        }
+
         // Helper function to escape fields for CSV
         function escapeForCsv(field) {
             if (field === undefined || field === null) {
                 return '';
             }
-            
             const stringField = String(field);
-            
-            // If the field contains commas, quotes, or newlines, enclose it in quotes
-            if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
-                // Double any existing quotes
-                return '"' + stringField.replace(/"/g, '""') + '"';
+             // If the field contains commas, double quotes, or newlines, enclose it in double quotes
+            // Also replace existing double quotes with two double quotes
+            if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n') || stringField.includes('\r')) {
+                 return '"' + stringField.replace(/"/g, '""') + '"';
             }
-            
             return stringField;
         }
 
-        // Helper to update status messages
+
+        // --- Utility Functions ---
+
         function updateStatus(element, message, type) {
             element.textContent = message;
-            element.className = 'status ' + type;
+            element.className = 'status ' + type; // Ensure 'status' base class is always present
         }
+
+         function resetExportState() {
+             exportJsonBtn.disabled = true;
+             exportCsvBtn.disabled = true;
+             viewPreviewBtn.disabled = true;
+             skillTypeFilter.disabled = true;
+             skillTypeFilter.value = 'all'; // Reset filter dropdown
+             previewSection.style.display = 'none'; // Hide preview
+             viewPreviewBtn.textContent = 'View Hierarchy Preview';
+             hierarchyPreview.innerHTML = ''; // Clear preview content
+             updateStatus(exportStatus, '', ''); // Clear export status
+             updateStatus(fetchStatus, '', ''); // Clear fetch status
+             resultStats.textContent = ''; // Clear stats
+             skillsData = []; // Clear skill data
+             hierarchyData = {}; // Clear hierarchy
+         }
+
+         function resetAppState() {
+             accessToken = null;
+             versionSelect.disabled = true;
+             fetchSkillsBtn.disabled = true;
+             versionSelect.innerHTML = '<option value="latest">Loading versions...</option>';
+             resetExportState(); // Also reset downstream elements
+         }
+
     </script>
 </body>
 </html>
