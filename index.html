@@ -352,18 +352,22 @@
         }
 
         // Build the skills hierarchy
+        // Build the skills hierarchy
         function buildHierarchy() {
             // Reset hierarchy data
             hierarchyData = {
                 version: versionSelect.value,
                 fetchDate: new Date().toISOString(),
                 types: skillTypes,
-                categories: {}
+                categories: {} // Use category NAME as key
             };
-            
+
             // Group skills by category and subcategory
             skillsData.forEach(skill => {
-                if (!skill.category) {
+                // --- Check if category exists and get its NAME ---
+                const categoryName = skill.category ? skill.category.name : null; // Get name string
+
+                if (!categoryName) {
                     // Skills without category
                     if (!hierarchyData.uncategorized) {
                         hierarchyData.uncategorized = [];
@@ -371,37 +375,39 @@
                     hierarchyData.uncategorized.push(skill);
                     return;
                 }
-                
-                const categoryName = skill.category;
-                
-                // Initialize category if it doesn't exist
+
+                // --- Check if subcategory exists and get its NAME ---
+                const subcategoryName = skill.subcategory ? skill.subcategory.name : null; // Get name string
+
+                // Initialize category using its NAME as the key if it doesn't exist
                 if (!hierarchyData.categories[categoryName]) {
                     hierarchyData.categories[categoryName] = {
-                        name: categoryName,
-                        subcategories: {}
+                        name: categoryName, // Store the name string
+                        subcategories: {}   // Use subcategory NAME as key
                     };
                 }
-                
+
                 // If skill has a subcategory
-                if (skill.subcategory) {
-                    const subcategoryName = skill.subcategory;
-                    
+                if (subcategoryName) {
+                    // Initialize subcategory using its NAME as the key if it doesn't exist
                     if (!hierarchyData.categories[categoryName].subcategories[subcategoryName]) {
                         hierarchyData.categories[categoryName].subcategories[subcategoryName] = {
-                            name: subcategoryName,
+                            name: subcategoryName, // Store the name string
                             skills: []
                         };
                     }
-                    
+                    // Add skill to the correct subcategory (identified by name)
                     hierarchyData.categories[categoryName].subcategories[subcategoryName].skills.push(skill);
                 } else {
                     // Skills with category but no subcategory
                     if (!hierarchyData.categories[categoryName].skills) {
                         hierarchyData.categories[categoryName].skills = [];
                     }
+                     // Add skill directly to the category (identified by name)
                     hierarchyData.categories[categoryName].skills.push(skill);
                 }
             });
+             console.log("Built Hierarchy:", hierarchyData); // Add for debugging if needed
         }
 
         // Filter hierarchy based on skill type
