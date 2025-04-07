@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightcast Skills Hierarchy Exporter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .auth-section, .version-section, .export-section {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d5f5e3;
+            color: #1e8449;
+        }
+        .error {
+            background-color: #f5b7b1;
+            color: #922b21;
+        }
+        .progress {
+            background-color: #ebf5fb;
+            color: #2874a6;
+        }
+        #loadingSpinner {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #resultStats {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .filter-controls {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Lightcast Skills Hierarchy Exporter</h1>
+    
+    <div class="container">
+        <div class="auth-section">
+            <h2>1. API Authentication</h2>
+            <label for="clientId">Client ID:</label>
+            <input type="text" id="clientId" placeholder="Enter your client_id">
+            
+            <label for="clientSecret">Client Secret:</label>
+            <input type="password" id="clientSecret" placeholder="Enter your client_secret">
+            
+            <button id="authenticateBtn">Authenticate</button>
+            <div id="authStatus" class="status"></div>
+        </div>
+        
+        <div class="version-section">
+            <h2>2. Select Version & Configure</h2>
+            <label for="versionSelect">Skills Taxonomy Version:</label>
+            <select id="versionSelect" disabled>
+                <option value="latest">Loading versions...</option>
+            </select>
+            
+            <button id="fetchSkillsBtn" disabled>Fetch Skills</button>
+            <div id="fetchStatus" class="status"></div>
+            <div id="loadingSpinner">
+                <div class="spinner"></div>
+                <p>Fetching skills. This may take a minute...</p>
+            </div>
+            <div id="resultStats"></div>
+        </div>
+        
+        <div class="export-section">
+            <h2>3. Export Skills Hierarchy</h2>
+            <div class="filter-controls">
+                <label for="skillTypeFilter">Filter by Skill Type:</label>
+                <select id="skillTypeFilter">
+                    <option value="all">All Types</option>
+                </select>
+            </div>
+            
+            <button id="exportJsonBtn" disabled>Export as JSON</button>
+            <button id="viewPreviewBtn" disabled>View Hierarchy Preview</button>
+            <div id="exportStatus" class="status"></div>
+        </div>
+        
+        <div id="previewSection" style="display: none;">
+            <h2>Hierarchy Preview</h2>
+            <div id="hierarchyPreview" style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; background-color: #fff;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let accessToken = null;
+        let skillsData = [];
+        let skillTypes = [];
+        let categories = {};
+        let hierarchyData = {};
+
+        // DOM Elements
+        const clientIdInput = document.getElementById('clientId');
+        const clientSecretInput = document.getElementById('clientSecret');
+        const authenticateBtn = document.getElementById('authenticateBtn');
+        const authStatus = document.getElementById('authStatus');
+        const versionSelect = document.getElementById('versionSelect');
+        const fetchSkillsBtn = document.getElementById('fetchSkillsBtn');
+        const fetchStatus = document.getElementById('fetchStatus');
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const viewPreviewBtn = document.getElementById('viewPreviewBtn');
+        const exportStatus = document.getElementById('exportStatus');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultStats = document.getElementById('resultStats');
+        const skillTypeFilter = document.getElementById('skillTypeFilter');
+        const previewSection = document.getElementById('previewSection');
+        const hierarchyPreview = document.getElementById('hierarchyPreview');
+
+        // Event Listeners
+        authenticateBtn.addEventListener('click', authenticate);
+        fetchSkillsBtn.addEventListener('click', fetchSkills);
+        exportJsonBtn.addEventListener('click', exportSkillsJson);
+        viewPreviewBtn.addEventListener('click', togglePreview);
+        skillTypeFilter.addEventListener('change', filterHierarchy);
+
+        // Authentication function
+        async function authenticate() {
+            const clientId = clientIdInput.value.trim();
+            const clientSecret = clientSecretInput.value.trim();
+            
+            if (!clientId || !clientSecret) {
+                updateStatus(authStatus, 'Please enter both Client ID and Client Secret.', 'error');
+                return;
+            }
+            
+            try {
+                updateStatus(authStatus, 'Authenticating...', 'progress');
+                
+                // Prepare form data for token request
+                const formData = new URLSearchParams();
+                formData.append('client_id', clientId);
+                formData.append('client_secret', clientSecret);
+                formData.append('grant_type', 'client_credentials');
+                formData.append('scope', 'lightcast_open_free');
+                
+                const response = await fetch('https://auth.emsicloud.com/connect/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.access_token) {
+                    accessToken = data.access_token;
+                    updateStatus(authStatus, 'Authentication successful! Token expires in ' + data.expires_in + ' seconds.', 'success');
+                    enableVersionSelection();
+                } else {
+                    updateStatus(authStatus, 'Authentication failed: ' + (data.error_description || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                updateStatus(authStatus, 'Authentication error: ' + error.message, 'error');
+            }
+        }
+
+        // Enable version selection after authentication
+        async function enableVersionSelection() {
+            try {
+                const response = await fetch('https://emsiservices.com/skills/versions', {
+                    headers: {
+                        'Authorization': 'Bearer ' + accessToken
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.data && data.data.length > 0) {
+                    // Clear existing options
+                    versionSelect.innerHTML = '';
+                    
+                    // Add "latest" option
+                    const latestOption = document.createElement('option');
+                    latestOption.value = 'latest';
+                    latestOption.textContent = 'latest (recommended)';
+                    versionSelect.appendChild(latestOption);
+                    
+                    // Add version options
+                    data.data.forEach(version => {
+                        const option = document.createElement('option');
+                        option.value = version;
+                        option.textContent = version;
+                        versionSelect.appendChild(option);
+                    });
+                    
+                    versionSelect.disabled = false;
+                    fetchSkillsBtn.disabled = false;
+                }
+            } catch (error) {
+                updateStatus(authStatus, 'Error fetching versions: ' + error.message, 'error');
+            }
+        }
+
+        // Fetch skills data
+        async function fetchSkills() {
+            const selectedVersion = versionSelect.value;
+            
+            try {
+                // First, get the skill types for this version
+                updateStatus(fetchStatus, 'Fetching skill types...', 'progress');
+                loadingSpinner.style.display = 'block';
+                
+                const versionResponse = await fetch(`https://emsiservices.com/skills/versions/${selectedVersion}`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + accessToken
+                    }
+                });
+                
+                const versionData = await versionResponse.json();
+                
+                if (versionData.data && versionData.data.types) {
+                    skillTypes = versionData.data.types;
+                    
+                    // Populate skill type filter
+                    skillTypeFilter.innerHTML = '<option value="all">All Types</option>';
+                    skillTypes.forEach(type => {
+                        if (type.id !== 'ST0') { // Skip "Removed" type
+                            const option = document.createElement('option');
+                            option.value = type.id;
+                            option.textContent = type.name;
+                            skillTypeFilter.appendChild(option);
+                        }
+                    });
+                }
+                
+                // Now fetch all skills with full fields
+                updateStatus(fetchStatus, 'Fetching skills data... This may take a minute.', 'progress');
+                
+                // Determine what fields we want to retrieve
+                const fields = versionData.data.fields.join(',');
+                
+                // Fetch all skills
+                const skillsResponse = await fetch(`https://emsiservices.com/skills/versions/${selectedVersion}/skills?fields=${fields}&limit=50000`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + accessToken
+                    }
+                });
+                
+                const skillsResult = await skillsResponse.json();
+                
+                if (skillsResult.data) {
+                    skillsData = skillsResult.data;
+                    updateStatus(fetchStatus, `Successfully fetched ${skillsData.length} skills!`, 'success');
+                    resultStats.textContent = `Total skills: ${skillsData.length}`;
+                    
+                    // Create hierarchy
+                    buildHierarchy();
+                    
+                    // Enable export button
+                    exportJsonBtn.disabled = false;
+                    viewPreviewBtn.disabled = false;
+                } else {
+                    updateStatus(fetchStatus, 'No skills data found.', 'error');
+                }
+            } catch (error) {
+                updateStatus(fetchStatus, 'Error fetching skills: ' + error.message, 'error');
+            } finally {
+                loadingSpinner.style.display = 'none';
+            }
+        }
+
+        // Build the skills hierarchy
+        function buildHierarchy() {
+            // Reset hierarchy data
+            hierarchyData = {
+                version: versionSelect.value,
+                fetchDate: new Date().toISOString(),
+                types: skillTypes,
+                categories: {}
+            };
+            
+            // Group skills by category and subcategory
+            skillsData.forEach(skill => {
+                if (!skill.category) {
+                    // Skills without category
+                    if (!hierarchyData.uncategorized) {
+                        hierarchyData.uncategorized = [];
+                    }
+                    hierarchyData.uncategorized.push(skill);
+                    return;
+                }
+                
+                // Initialize category if it doesn't exist
+                if (!hierarchyData.categories[skill.category]) {
+                    hierarchyData.categories[skill.category] = {
+                        name: skill.category,
+                        subcategories: {}
+                    };
+                }
+                
+                // If skill has a subcategory
+                if (skill.subcategory) {
+                    if (!hierarchyData.categories[skill.category].subcategories[skill.subcategory]) {
+                        hierarchyData.categories[skill.category].subcategories[skill.subcategory] = {
+                            name: skill.subcategory,
+                            skills: []
+                        };
+                    }
+                    
+                    hierarchyData.categories[skill.category].subcategories[skill.subcategory].skills.push(skill);
+                } else {
+                    // Skills with category but no subcategory
+                    if (!hierarchyData.categories[skill.category].skills) {
+                        hierarchyData.categories[skill.category].skills = [];
+                    }
+                    hierarchyData.categories[skill.category].skills.push(skill);
+                }
+            });
+        }
+
+        // Filter hierarchy based on skill type
+        function filterHierarchy() {
+            const typeId = skillTypeFilter.value;
+            createHierarchyPreview(typeId);
+        }
+
+        // Create a preview of the hierarchy
+        function createHierarchyPreview(typeFilter = 'all') {
+            hierarchyPreview.innerHTML = '';
+            
+            // Count skills
+            let totalSkills = 0;
+            let filteredSkills = 0;
+            
+            // Create a representation of the hierarchy
+            const createCategoryList = document.createElement('ul');
+            
+            // Sort categories alphabetically
+            const sortedCategories = Object.keys(hierarchyData.categories).sort();
+            
+            sortedCategories.forEach(categoryKey => {
+                const category = hierarchyData.categories[categoryKey];
+                const categoryItem = document.createElement('li');
+                
+                // Create collapsible section for each category
+                const categoryHeader = document.createElement('div');
+                categoryHeader.style.fontWeight = 'bold';
+                categoryHeader.style.cursor = 'pointer';
+                categoryHeader.innerHTML = `<span class="toggle">▼</span> ${category.name}`;
+                
+                // Count skills in this category
+                let categorySkillCount = 0;
+                let categoryFilteredCount = 0;
+                
+                // Count category's direct skills
+                if (category.skills) {
+                    categorySkillCount += category.skills.length;
+                    
+                    // Filter by skill type if needed
+                    if (typeFilter !== 'all') {
+                        const filteredDirectSkills = category.skills.filter(
+                            skill => skill.type && skill.type.id === typeFilter
+                        );
+                        categoryFilteredCount += filteredDirectSkills.length;
+                    } else {
+                        categoryFilteredCount += category.skills.length;
+                    }
+                }
+                
+                // Count skills in subcategories
+                const subcategoriesList = document.createElement('ul');
+                subcategoriesList.style.display = 'block'; // Start expanded
+                
+                // Sort subcategories alphabetically
+                const sortedSubcategories = Object.keys(category.subcategories).sort();
+                
+                sortedSubcategories.forEach(subKey => {
+                    const subcategory = category.subcategories[subKey];
+                    categorySkillCount += subcategory.skills.length;
+                    
+                    // Filter by skill type if needed
+                    let subcategoryFilteredSkills = subcategory.skills;
+                    if (typeFilter !== 'all') {
+                        subcategoryFilteredSkills = subcategory.skills.filter(
+                            skill => skill.type && skill.type.id === typeFilter
+                        );
+                    }
+                    
+                    categoryFilteredCount += subcategoryFilteredSkills.length;
+                    
+                    // Only show subcategories that have matching skills after filtering
+                    if (subcategoryFilteredSkills.length > 0) {
+                        const subcategoryItem = document.createElement('li');
+                        
+                        // Create subcategory header with toggle
+                        const subcategoryHeader = document.createElement('div');
+                        subcategoryHeader.style.fontWeight = 'bold';
+                        subcategoryHeader.style.cursor = 'pointer';
+                        subcategoryHeader.innerHTML = `<span class="toggle">▼</span> ${subcategory.name} (${subcategoryFilteredSkills.length} skills)`;
+                        
+                        // Create skills list for this subcategory
+                        const skillsList = document.createElement('ul');
+                        skillsList.style.display = 'block'; // Start expanded
+                        
+                        // Add skills
+                        subcategoryFilteredSkills.forEach(skill => {
+                            const skillItem = document.createElement('li');
+                            const skillType = skill.type ? skill.type.name : 'Unknown';
+                            skillItem.textContent = `${skill.name} (${skillType})`;
+                            skillsList.appendChild(skillItem);
+                        });
+                        
+                        // Add toggle event
+                        subcategoryHeader.addEventListener('click', function() {
+                            const toggle = this.querySelector('.toggle');
+                            if (skillsList.style.display === 'none') {
+                                skillsList.style.display = 'block';
+                                toggle.textContent = '▼';
+                            } else {
+                                skillsList.style.display = 'none';
+                                toggle.textContent = '►';
+                            }
+                        });
+                        
+                        subcategoryItem.appendChild(subcategoryHeader);
+                        subcategoryItem.appendChild(skillsList);
+                        subcategoriesList.appendChild(subcategoryItem);
+                    }
+                });
+                
+                // Add category's direct skills if they match the filter
+                if (category.skills && category.skills.length > 0) {
+                    let directSkills = category.skills;
+                    if (typeFilter !== 'all') {
+                        directSkills = category.skills.filter(
+                            skill => skill.type && skill.type.id === typeFilter
+                        );
+                    }
+                    
+                    if (directSkills.length > 0) {
+                        const directSkillsItem = document.createElement('li');
+                        
+                        // Create direct skills header
+                        const directSkillsHeader = document.createElement('div');
+                        directSkillsHeader.style.fontWeight = 'bold';
+                        directSkillsHeader.style.cursor = 'pointer';
+                        directSkillsHeader.innerHTML = `<span class="toggle">▼</span> Direct Skills (${directSkills.length})`;
+                        
+                        // Create skills list
+                        const directSkillsList = document.createElement('ul');
+                        directSkillsList.style.display = 'block'; // Start expanded
+                        
+                        // Add skills
+                        directSkills.forEach(skill => {
+                            const skillItem = document.createElement('li');
+                            const skillType = skill.type ? skill.type.name : 'Unknown';
+                            skillItem.textContent = `${skill.name} (${skillType})`;
+                            directSkillsList.appendChild(skillItem);
+                        });
+                        
+                        // Add toggle event
+                        directSkillsHeader.addEventListener('click', function() {
+                            const toggle = this.querySelector('.toggle');
+                            if (directSkillsList.style.display === 'none') {
+                                directSkillsList.style.display = 'block';
+                                toggle.textContent = '▼';
+                            } else {
+                                directSkillsList.style.display = 'none';
+                                toggle.textContent = '►';
+                            }
+                        });
+                        
+                        directSkillsItem.appendChild(directSkillsHeader);
+                        directSkillsItem.appendChild(directSkillsList);
+                        subcategoriesList.appendChild(directSkillsItem);
+                    }
+                }
+                
+                totalSkills += categorySkillCount;
+                filteredSkills += categoryFilteredCount;
+                
+                // Only show categories that have skills after filtering
+                if (categoryFilteredCount > 0) {
+                    categoryHeader.innerHTML = `<span class="toggle">▼</span> ${category.name} (${categoryFilteredCount} of ${categorySkillCount} skills)`;
+                    
+                    // Add toggle event
+                    categoryHeader.addEventListener('click', function() {
+                        const toggle = this.querySelector('.toggle');
+                        if (subcategoriesList.style.display === 'none') {
+                            subcategoriesList.style.display = 'block';
+                            toggle.textContent = '▼';
+                        } else {
+                            subcategoriesList.style.display = 'none';
+                            toggle.textContent = '►';
+                        }
+                    });
+                    
+                    categoryItem.appendChild(categoryHeader);
+                    categoryItem.appendChild(subcategoriesList);
+                    createCategoryList.appendChild(categoryItem);
+                }
+            });
+            
+            // Show uncategorized skills if they exist and match filter
+            if (hierarchyData.uncategorized && hierarchyData.uncategorized.length > 0) {
+                let uncategorizedSkills = hierarchyData.uncategorized;
+                if (typeFilter !== 'all') {
+                    uncategorizedSkills = hierarchyData.uncategorized.filter(
+                        skill => skill.type && skill.type.id === typeFilter
+                    );
+                }
+                
+                if (uncategorizedSkills.length > 0) {
+                    const uncategorizedItem = document.createElement('li');
+                    
+                    // Create uncategorized header
+                    const uncategorizedHeader = document.createElement('div');
+                    uncategorizedHeader.style.fontWeight = 'bold';
+                    uncategorizedHeader.style.cursor = 'pointer';
+                    uncategorizedHeader.innerHTML = `<span class="toggle">▼</span> Uncategorized Skills (${uncategorizedSkills.length})`;
+                    
+                    // Create skills list
+                    const uncategorizedList = document.createElement('ul');
+                    uncategorizedList.style.display = 'block'; // Start expanded
+                    
+                    // Add skills
+                    uncategorizedSkills.forEach(skill => {
+                        const skillItem = document.createElement('li');
+                        const skillType = skill.type ? skill.type.name : 'Unknown';
+                        skillItem.textContent = `${skill.name} (${skillType})`;
+                        uncategorizedList.appendChild(skillItem);
+                    });
+                    
+                    // Add toggle event
+                    uncategorizedHeader.addEventListener('click', function() {
+                        const toggle = this.querySelector('.toggle');
+                        if (uncategorizedList.style.display === 'none') {
+                            uncategorizedList.style.display = 'block';
+                            toggle.textContent = '▼';
+                        } else {
+                            uncategorizedList.style.display = 'none';
+                            toggle.textContent = '►';
+                        }
+                    });
+                    
+                    uncategorizedItem.appendChild(uncategorizedHeader);
+                    uncategorizedItem.appendChild(uncategorizedList);
+                    createCategoryList.appendChild(uncategorizedItem);
+                    
+                    totalSkills += hierarchyData.uncategorized.length;
+                    filteredSkills += uncategorizedSkills.length;
+                }
+            }
+            
+            // Show stats
+            const statsElement = document.createElement('div');
+            statsElement.innerHTML = `<p>Showing ${filteredSkills} of ${totalSkills} total skills</p>`;
+            
+            // Add to preview
+            hierarchyPreview.appendChild(statsElement);
+            hierarchyPreview.appendChild(createCategoryList);
+        }
+
+        // Toggle hierarchy preview
+        function togglePreview() {
+            if (previewSection.style.display === 'none') {
+                previewSection.style.display = 'block';
+                createHierarchyPreview(skillTypeFilter.value);
+                viewPreviewBtn.textContent = 'Hide Hierarchy Preview';
+            } else {
+                previewSection.style.display = 'none';
+                viewPreviewBtn.textContent = 'View Hierarchy Preview';
+            }
+        }
+
+        // Export skills as JSON
+        function exportSkillsJson() {
+            try {
+                // Create a filtered version if needed
+                let dataToExport = hierarchyData;
+                const typeFilter = skillTypeFilter.value;
+                
+                if (typeFilter !== 'all') {
+                    // Create a deep clone of the hierarchy
+                    const filteredData = {
+                        version: hierarchyData.version,
+                        fetchDate: hierarchyData.fetchDate,
+                        types: hierarchyData.types,
+                        categories: {}
+                    };
+                    
+                    // Filter categories and subcategories
+                    Object.keys(hierarchyData.categories).forEach(categoryKey => {
+                        const category = hierarchyData.categories[categoryKey];
+                        const filteredCategory = {
+                            name: category.name,
+                            subcategories: {}
+                        };
+                        
+                        // Filter direct skills
+                        if (category.skills) {
+                            const filteredSkills = category.skills.filter(
+                                skill => skill.type && skill.type.id === typeFilter
+                            );
+                            
+                            if (filteredSkills.length > 0) {
+                                filteredCategory.skills = filteredSkills;
+                            }
+                        }
+                        
+                        // Filter subcategories
+                        Object.keys(category.subcategories).forEach(subKey => {
+                            const subcategory = category.subcategories[subKey];
+                            const filteredSkills = subcategory.skills.filter(
+                                skill => skill.type && skill.type.id === typeFilter
+                            );
+                            
+                            if (filteredSkills.length > 0) {
+                                filteredCategory.subcategories[subKey] = {
+                                    name: subcategory.name,
+                                    skills: filteredSkills
+                                };
+                            }
+                        });
+                        
+                        // Only add category if it has any skills after filtering
+                        if ((filteredCategory.skills && filteredCategory.skills.length > 0) || 
+                            Object.keys(filteredCategory.subcategories).length > 0) {
+                            filteredData.categories[categoryKey] = filteredCategory;
+                        }
+                    });
+                    
+                    // Filter uncategorized skills
+                    if (hierarchyData.uncategorized) {
+                        const filteredUncategorized = hierarchyData.uncategorized.filter(
+                            skill => skill.type && skill.type.id === typeFilter
+                        );
+                        
+                        if (filteredUncategorized.length > 0) {
+                            filteredData.uncategorized = filteredUncategorized;
+                        }
+                    }
+                    
+                    dataToExport = filteredData;
+                }
+                
+                // Convert to JSON string
+                const jsonString = JSON.stringify(dataToExport, null, 2);
+                
+                // Create a Blob and generate download link
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                // Create a temporary link and trigger download
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `lightcast-skills-hierarchy-${dataToExport.version}-${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(link);
+                link.click();
+                
+                // Clean up
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                updateStatus(exportStatus, 'Successfully exported skills hierarchy as JSON!', 'success');
+            } catch (error) {
+                updateStatus(exportStatus, 'Error exporting JSON: ' + error.message, 'error');
+            }
+        }
+
+        // Helper to update status messages
+        function updateStatus(element, message, type) {
+            element.textContent = message;
+            element.className = 'status ' + type;
+        }
+    </script>
+</body>
+</html>
